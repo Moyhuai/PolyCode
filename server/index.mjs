@@ -116,7 +116,6 @@ const LANG_DEFS = [
     fileName: 'main.py',
     detect: [
       { command: 'python', args: ['--version'] },
-      { command: 'python3', args: ['--version'] },
       { command: 'py', args: ['-3', '--version'] },
     ],
     run: ({ runtime, entry }) => ({ command: runtime.command, args: [entry] }),
