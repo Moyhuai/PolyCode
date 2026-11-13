@@ -6,6 +6,13 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import {
+  REMOTE_LANGUAGES,
+  REMOTE_MAX_CODE_BYTES,
+  REMOTE_MAX_STDIN_BYTES,
+  REMOTE_RUN_TIMEOUT,
+  runRemote,
+} from './remote.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
@@ -435,7 +442,7 @@ async function detectAll() {
 
 function publicCatalog() {
   return LANG_DEFS.map((def) => {
-    const runtime = runtimes.get(def.id) || {};
+    const available = Boolean(def.preview || REMOTE_LANGUAGES[def.id]);
     return {
       id: def.id,
       name: def.name,
@@ -443,9 +450,9 @@ function publicCatalog() {
       color: def.color,
       fileName: def.fileName,
       preview: Boolean(def.preview),
-      available: Boolean(runtime.available),
-      version: runtime.version || null,
-      reason: runtime.reason || null,
+      available,
+      version: def.preview ? '浏览器预览' : available ? '云端执行' : null,
+      reason: available ? null : '暂不支持云端执行',
     };
   });
 }
@@ -515,121 +522,65 @@ function finishSession(session, exitCode) {
 }
 
 async function startSession(session) {
-  const { def, dir, runtime, files, entry, initialStdin } = session;
-  const env = { ...(def.env || {}) };
-  let prepared;
-
-  try {
-    prepared = await prepareSource(dir, def, files, entry);
-  } catch (error) {
-    emit(session, { type: 'stderr', text: `写入源代码失败：${error.message}\n` });
+  if (session.stopped) {
     finishSession(session, null);
     return;
   }
-  session.entry = prepared.entry;
-  session.files = prepared.files;
 
-  if (def.compile) {
-    emit(session, { type: 'status', text: '正在编译…' });
-    const compile = def.compile({ dir, runtime, entry: prepared.entry, files: prepared.files });
-    const compiled = await runProcess(compile.command, compile.args, {
-      cwd: dir,
-      timeout: COMPILE_TIMEOUT,
-      env,
-    });
-    session.compileMs = compiled.durationMs;
-    if (compiled.stdout) emit(session, { type: 'stdout', text: compiled.stdout });
-    if (compiled.stderr) emit(session, { type: 'stderr', text: compiled.stderr });
+  const source = session.files.find((file) => file.path === session.entry) || session.files[0];
+  const controller = new AbortController();
+  session.controller = controller;
 
-    if (compiled.spawnError || compiled.timedOut || compiled.exitCode !== 0) {
-      emit(session, {
-        type: 'stderr',
-        text: compiled.spawnError
-          ? `无法启动编译器：${compiled.spawnError}\n`
-          : compiled.timedOut
-            ? '\n[编译超时（30 秒）]\n'
-            : '',
-      });
-      session.compileFailed = true;
-      finishSession(session, compiled.exitCode);
+  const timer = setTimeout(() => {
+    session.timedOut = true;
+    controller.abort();
+  }, REMOTE_RUN_TIMEOUT);
+
+  emit(session, { type: 'status', text: '正在云端执行…' });
+
+  try {
+    const result = await runRemote(
+      session.def.id,
+      source.content,
+      session.initialStdin,
+      controller.signal
+    );
+
+    if (session.stopped) {
+      finishSession(session, null);
       return;
     }
-  }
 
-  const command = def.run({ dir, runtime, entry: prepared.entry, files: prepared.files });
-  let child;
-  try {
-    child = spawn(command.command, command.args, {
-      cwd: dir,
-      windowsHide: true,
-      detached: !isWin,
-      env: { ...process.env, ...env },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-  } catch (error) {
-    emit(session, { type: 'stderr', text: `无法启动运行时：${error.message}\n` });
-    finishSession(session, null);
-    return;
-  }
-
-  session.child = child;
-  touch(session);
-
-  const push = (type, chunk) => {
-    const text = chunk.toString('utf8');
-    if (session.truncated) return;
-    const room = MAX_OUTPUT - session.captured;
-    const slice = text.length > room ? text.slice(0, room) : text;
-    session.captured += slice.length;
-    if (slice) emit(session, { type, text: slice });
-    if (session.captured >= MAX_OUTPUT) {
-      session.truncated = true;
-      emit(session, { type: 'stderr', text: '\n[输出超过上限，进程已被终止]\n' });
-      killTree(child);
+    session.compileFailed = result.compileFailed;
+    if (result.stdout) {
+      emit(session, {
+        type: 'stdout',
+        text: result.stdout.endsWith('\n') ? result.stdout : `${result.stdout}\n`,
+      });
     }
-  };
-
-  child.stdout?.on('data', (chunk) => {
-    touch(session);
-    push('stdout', chunk);
-  });
-  child.stderr?.on('data', (chunk) => {
-    touch(session);
-    push('stderr', chunk);
-  });
-
-  child.on('error', (error) => {
-    emit(session, { type: 'stderr', text: `无法启动运行时：${error.message}\n` });
-    finishSession(session, null);
-  });
-
-  child.on('close', (code) => {
-    finishSession(session, code);
-  });
-
-  // 预置输入：补一个换行，保证 input()/readline 能立即读到整行；随后保持 stdin 打开等待实时输入
-  try {
-    if (initialStdin) {
-      const payload = initialStdin.endsWith('\n') ? initialStdin : `${initialStdin}\n`;
-      child.stdin.write(payload);
-    }
-  } catch {
-    /* ignore */
-  }
-
-  session.ticker = setInterval(() => {
-    if (session.closed || session.timedOut) return;
-    const now = Date.now();
-    const idle = now - session.lastActivity;
-    if (idle > SESSION_IDLE_TIMEOUT || now - session.started > SESSION_MAX_TIMEOUT) {
-      session.timedOut = true;
+    if (result.stderr) {
       emit(session, {
         type: 'stderr',
-        text: `\n[程序超过 ${Math.round(SESSION_IDLE_TIMEOUT / 1000)} 秒没有响应，已被终止]\n`,
+        text: result.stderr.endsWith('\n') ? result.stderr : `${result.stderr}\n`,
       });
-      killTree(child);
     }
-  }, 500);
+    finishSession(session, result.stderr && result.exitCode === 0 ? 1 : result.exitCode);
+  } catch (error) {
+    if (session.closed) return;
+
+    if (!session.stopped) {
+      emit(session, {
+        type: 'stderr',
+        text:
+          error?.name === 'AbortError'
+            ? `\n[云端执行超过 ${Math.round(REMOTE_RUN_TIMEOUT / 1000)} 秒，已中止]\n`
+            : `云端执行失败：${error?.message || '未知错误'}\n`,
+      });
+    }
+    finishSession(session, null);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 app.post('/api/sessions', async (req, res) => {
@@ -674,10 +625,22 @@ app.post('/api/sessions', async (req, res) => {
     projectFiles = [{ path: def.fileName, content: code }];
   }
 
+  if (projectFiles.length > 1) {
+    res.status(400).json({ error: '云端执行接口只支持单文件，请保留一个文件后再运行' });
+    return;
+  }
+  if (Buffer.byteLength(projectFiles[0].content, 'utf8') > REMOTE_MAX_CODE_BYTES) {
+    res.status(413).json({ error: '代码过大，云端执行上限 100KB' });
+    return;
+  }
+  if (Buffer.byteLength(typeof stdin === 'string' ? stdin : '', 'utf8') > REMOTE_MAX_STDIN_BYTES) {
+    res.status(413).json({ error: '标准输入过大，云端执行上限 10KB' });
+    return;
+  }
+
   const entryPath = safeRelPath(entry) || def.fileName;
-  const runtime = runtimes.get(def.id);
-  if (!runtime?.available) {
-    res.status(400).json({ error: `${def.name} 运行时未安装，无法执行` });
+  if (!REMOTE_LANGUAGES[def.id]) {
+    res.status(400).json({ error: `${def.name} 暂不支持云端执行` });
     return;
   }
 
@@ -693,7 +656,6 @@ app.post('/api/sessions', async (req, res) => {
     id: randomUUID(),
     def,
     dir,
-    runtime,
     files: projectFiles,
     entry: entryPath,
     initialStdin: typeof stdin === 'string' ? stdin : '',
@@ -707,6 +669,9 @@ app.post('/api/sessions', async (req, res) => {
     compileMs: 0,
     compileFailed: false,
     closed: false,
+    stopped: false,
+    remote: true,
+    controller: null,
     child: null,
     ticker: null,
   };
@@ -753,7 +718,15 @@ app.post('/api/sessions/:id/input', (req, res) => {
     res.status(404).json({ error: '会话不存在或已结束' });
     return;
   }
-  if (session.closed || !session.child) {
+  if (session.closed) {
+    res.status(409).json({ error: '程序已结束，无法继续输入' });
+    return;
+  }
+  if (session.remote) {
+    res.status(409).json({ error: '云端执行不支持运行中输入，请在运行前填写标准输入' });
+    return;
+  }
+  if (!session.child) {
     res.status(409).json({ error: '程序已结束，无法继续输入' });
     return;
   }
@@ -774,7 +747,9 @@ app.post('/api/sessions/:id/stop', (req, res) => {
     res.status(404).json({ error: '会话不存在或已结束' });
     return;
   }
+  session.stopped = true;
   emit(session, { type: 'status', text: '正在终止…' });
+  if (session.controller) session.controller.abort();
   if (session.child) killTree(session.child);
   res.json({ ok: true });
 });
@@ -901,119 +876,51 @@ app.post('/api/run', async (req, res) => {
     res.status(400).json({ error: '不支持的语言' });
     return;
   }
+  if (def.preview) {
+    res.status(400).json({ error: 'HTML 直接在浏览器中预览，无需执行' });
+    return;
+  }
+  if (!REMOTE_LANGUAGES[def.id]) {
+    res.status(400).json({ error: `${def.name} 暂不支持云端执行` });
+    return;
+  }
   if (typeof code !== 'string' || code.trim() === '') {
     res.status(400).json({ error: '代码内容不能为空' });
     return;
   }
-  if (Buffer.byteLength(code, 'utf8') > MAX_CODE_BYTES) {
-    res.status(413).json({ error: '代码过大，上限 200KB' });
+  if (Buffer.byteLength(code, 'utf8') > REMOTE_MAX_CODE_BYTES) {
+    res.status(413).json({ error: '代码过大，云端执行上限 100KB' });
+    return;
+  }
+  if (Buffer.byteLength(typeof stdin === 'string' ? stdin : '', 'utf8') > REMOTE_MAX_STDIN_BYTES) {
+    res.status(413).json({ error: '标准输入过大，云端执行上限 10KB' });
     return;
   }
 
-  const runtime = runtimes.get(def.id);
-  if (!runtime?.available) {
-    res.status(400).json({ error: `${def.name} 运行时未安装，无法执行` });
-    return;
-  }
-
-  let dir;
+  const started = Date.now();
   try {
-    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'polycode-'));
-    const prepared = await prepareSource(dir, def, [{ path: def.fileName, content: code }], def.fileName);
-
-    const env = {
-      ...(def.env || {}),
-    };
-
-    let compileDuration = 0;
-    if (def.compile) {
-      const compile = def.compile({
-        dir,
-        runtime,
-        entry: prepared.entry,
-        files: prepared.files,
-      });
-      const compiled = await runProcess(compile.command, compile.args, {
-        cwd: dir,
-        timeout: COMPILE_TIMEOUT,
-        env,
-      });
-      compileDuration = compiled.durationMs;
-
-      if (compiled.spawnError) {
-        res.json({
-          ok: false,
-          phase: 'compile',
-          stdout: compiled.stdout,
-          stderr: `无法启动编译器：${compiled.spawnError}`,
-          exitCode: null,
-          durationMs: compiled.durationMs,
-        });
-        return;
-      }
-      if (compiled.timedOut) {
-        res.json({
-          ok: false,
-          phase: 'compile',
-          stdout: compiled.stdout,
-          stderr: '编译超时（30 秒）',
-          exitCode: compiled.exitCode,
-          timedOut: true,
-          durationMs: compiled.durationMs,
-        });
-        return;
-      }
-      if (compiled.exitCode !== 0) {
-        res.json({
-          ok: false,
-          phase: 'compile',
-          stdout: compiled.stdout,
-          stderr: compiled.stderr || '编译失败',
-          exitCode: compiled.exitCode,
-          durationMs: compiled.durationMs,
-        });
-        return;
-      }
-    }
-
-    const command = def.run({
-      dir,
-      runtime,
-      entry: prepared.entry,
-      files: prepared.files,
-    });
-    const result = await runProcess(command.command, command.args, {
-      cwd: dir,
-      input: typeof stdin === 'string' ? stdin : '',
-      timeout: RUN_TIMEOUT,
-      env,
-    });
-
-    const stderr = result.spawnError
-      ? `无法启动运行时：${result.spawnError}`
-      : result.stderr;
+    const result = await runRemote(def.id, code, typeof stdin === 'string' ? stdin : '');
     const stdinEmpty = typeof stdin !== 'string' || stdin.trim() === '';
     const stdinHint =
-      stdinEmpty && /EOFError|EOF when reading a line|NoSuchElementException/i.test(stderr);
+      stdinEmpty &&
+      /EOFError|EOF when reading a line|NoSuchElementException/i.test(
+        `${result.stderr}\n${result.stdout}`
+      );
 
     res.json({
-      ok: result.exitCode === 0 && !result.timedOut,
-      phase: 'run',
+      ok: result.exitCode === 0 && !result.stderr,
+      phase: result.compileFailed ? 'compile' : 'run',
       stdout: result.stdout,
-      stderr,
+      stderr: result.stderr,
       exitCode: result.exitCode,
-      timedOut: result.timedOut,
-      truncated: result.truncated,
-      durationMs: result.durationMs,
-      compileMs: compileDuration,
+      timedOut: false,
+      truncated: false,
+      durationMs: Date.now() - started,
+      compileMs: 0,
       stdinHint,
     });
   } catch (error) {
-    res.status(500).json({ error: `执行失败：${error.message}` });
-  } finally {
-    if (dir) {
-      fs.rm(dir, { recursive: true, force: true }).catch(() => {});
-    }
+    res.status(502).json({ error: `云端执行失败：${error.message}` });
   }
 });
 
@@ -1028,11 +935,10 @@ app.get(/^\/(?!api\/).*/, (_req, res, next) => {
 
 async function bootstrap() {
   await loadShares();
-  await detectAll().catch((error) => console.error('[polycode] 运行时探测失败：', error));
   app.listen(PORT, () => {
-    const ready = [...runtimes.values()].filter((item) => item.available).length;
+    const ready = LANG_DEFS.filter((def) => def.preview || REMOTE_LANGUAGES[def.id]).length;
     console.log(`[polycode] 服务已启动：http://127.0.0.1:${PORT}`);
-    console.log(`[polycode] 可用运行时：${ready}/${LANG_DEFS.length}`);
+    console.log(`[polycode] 云端执行语言：${ready}/${LANG_DEFS.length}`);
   });
 }
 

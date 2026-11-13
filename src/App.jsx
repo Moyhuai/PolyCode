@@ -491,7 +491,7 @@ export default function App() {
         stdout: '',
         stderr:
           error?.message === 'Failed to fetch'
-            ? '无法连接到执行服务，请确认后端已启动（npm run dev）。'
+            ? '无法连接到执行服务，请检查网络或稍后重试。'
             : `执行失败：${error?.message || '未知错误'}`,
         exitCode: null,
         durationMs: 0,
@@ -766,8 +766,8 @@ export default function App() {
             <span className={`status-pill ${status}`}>
               <span className="dot" />
               {status === 'loading'
-                ? '正在检测本机运行时…'
-                : `${availableCount} / ${catalog.length} 个运行时就绪`}
+                ? '正在连接云端执行服务…'
+                : `${availableCount} / ${catalog.length} 种语言可执行`}
             </span>
           )}
         </div>
@@ -846,14 +846,14 @@ export default function App() {
                           title={
                             lang.available
                               ? `${lang.name} ${lang.version || ''}`
-                              : lang.reason || '本机未安装该运行时'
+                              : lang.reason || '暂不支持云端执行'
                           }
                         >
                           <span className="monogram">{lang.monogram}</span>
                           <span className="rail-meta">
                             <span className="rail-name">{lang.name}</span>
                             <span className="rail-version">
-                              {lang.available ? lang.version || '已安装' : '未安装'}
+                              {lang.available ? lang.version || '可用' : '不可用'}
                             </span>
                           </span>
                           <span className={`avail-dot${lang.available ? ' on' : ''}`} />
@@ -863,7 +863,7 @@ export default function App() {
               </div>
               <div className="rail-foot">
                 <span className="ping" />
-                运行时来自本机环境
+                代码在云端服务器执行
               </div>
             </>
           ) : (
@@ -1090,8 +1090,8 @@ export default function App() {
                   <p>{activeIsPreview ? '点击「运行代码」预览页面' : '点击「运行代码」查看结果'}</p>
                   <span>
                     {availableCount > 0
-                      ? `${availableCount} 个运行时可用 · 支持 ${SNIPPET_COUNT} 种语言`
-                      : '正在检测本机可用的语言运行时'}
+                      ? `${availableCount} 种语言可云端执行 · 支持 ${SNIPPET_COUNT} 种语言`
+                      : '正在连接云端执行服务'}
                   </span>
                 </div>
               )}

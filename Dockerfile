@@ -10,28 +10,12 @@ COPY src ./src
 RUN npm run build
 
 # ---------- 运行镜像 ----------
-# 同时支持 x86_64 与 ARM64（Oracle 永久免费实例为 ARM A1）
+# 代码通过云端接口执行，镜像只需 Node 运行时；同时支持 x86_64 与 ARM64
 FROM node:24-slim
 WORKDIR /app
 
-# 内置各语言运行时：Python / C / C++ / Java / Go / PHP / Ruby（JS/TS 由 Node 24 提供）
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends \
-    python3 \
-    python-is-python3 \
-    gcc \
-    g++ \
-    default-jdk-headless \
-    golang-go \
-    php-cli \
-    ruby \
-  && rm -rf /var/lib/apt/lists/*
-
 ENV NODE_ENV=production \
-    PORT=8787 \
-    GOCACHE=/tmp/go-build \
-    GOPATH=/tmp/go \
-    GOTMPDIR=/tmp
+    PORT=8787
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
