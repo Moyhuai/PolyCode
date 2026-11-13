@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CodeEditor from './components/CodeEditor';
 import PromptLibrary from './components/PromptLibrary';
-import { LANGUAGE_CATALOG, SNIPPETS } from './languages';
+import { SNIPPETS } from './languages';
+import { JUDGE0_CATALOG, runOnJudge0 } from './judge0';
 import {
   buildPreviewHtml,
   buildTree,
@@ -19,12 +20,6 @@ import {
 } from './projectStore';
 
 const SNIPPET_COUNT = Object.keys(SNIPPETS).length;
-
-// 构建时可通过 VITE_API_BASE 指向独立部署的执行服务；
-// VITE_STATIC_HOST 表示纯静态托管（如 GitHub Pages），此时不请求 /api，直接进入离线模式
-const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '');
-const STATIC_HOST = !API_BASE && import.meta.env.VITE_STATIC_HOST === 'true';
-const apiPath = (path) => `${API_BASE}${path}`;
 
 function formatDuration(ms) {
   if (typeof ms !== 'number' || Number.isNaN(ms)) return '—';
@@ -162,6 +157,8 @@ export default function App() {
   const [view, setView] = useState('code');
   const [catalog, setCatalog] = useState([]);
   const [status, setStatus] = useState('loading');
+  // engine: server = 本机后端执行服务；judge0 = 纯静态部署时浏览器直连公共执行 API
+  const [engine, setEngine] = useState('server');
   const [reloadKey, setReloadKey] = useState(0);
   const [activeId, setActiveId] = useState('javascript');
   const [projects, setProjects] = useState(loadProjects);
@@ -175,6 +172,7 @@ export default function App() {
   const railListRef = useRef(null);
   const [lineInput, setLineInput] = useState('');
   const sessionRef = useRef(null);
+  const judge0AbortRef = useRef(null);
   const runTokenRef = useRef(0);
   const outputRef = useRef(null);
   const [result, setResult] = useState(null);
@@ -210,20 +208,12 @@ export default function App() {
     [project]
   );
   const canRun =
-    (status === 'ready' || activeIsPreview) &&
-    Boolean(activeMeta?.available) &&
-    !running &&
-    hasContent;
+    status === 'ready' && Boolean(activeMeta?.available) && !running && hasContent;
 
   useEffect(() => {
     let cancelled = false;
-    if (STATIC_HOST) {
-      setCatalog(LANGUAGE_CATALOG);
-      setStatus('offline');
-      return undefined;
-    }
     setStatus('loading');
-    fetch(apiPath('/api/languages'))
+    fetch('/api/languages')
       .then((res) => {
         if (!res.ok) throw new Error('bad response');
         return res.json();
@@ -235,8 +225,10 @@ export default function App() {
       })
       .catch(() => {
         if (cancelled) return;
-        setCatalog(LANGUAGE_CATALOG);
-        setStatus('offline');
+        // 没有后端（例如 GitHub Pages）时退回到浏览器直连公共执行 API
+        setEngine('judge0');
+        setCatalog(JUDGE0_CATALOG);
+        setStatus('ready');
       });
     return () => {
       cancelled = true;
@@ -414,6 +406,67 @@ export default function App() {
       return;
     }
 
+    // 纯静态部署（无后端）：浏览器直连 Judge0 公共执行 API
+    if (engine === 'judge0') {
+      if (project.files.length > 1) {
+        showToast('云端执行只支持单文件，请保留一个文件后再运行');
+        return;
+      }
+
+      const source =
+        project.files.find((file) => file.path === entryPath)?.content ?? activeCode;
+      const token = ++runTokenRef.current;
+      const controller = new AbortController();
+      judge0AbortRef.current = controller;
+
+      setRunning(true);
+      setResult({
+        ok: true,
+        phase: 'run',
+        stdout: '',
+        stderr: '',
+        exitCode: null,
+        durationMs: 0,
+        running: true,
+        statusText: '正在云端执行…',
+      });
+
+      try {
+        const outcome = await runOnJudge0(activeId, source, stdin, controller.signal);
+        if (runTokenRef.current !== token) return;
+        setResult({
+          ok: outcome.exitCode === 0 && !outcome.timedOut,
+          phase: outcome.compileFailed ? 'compile' : 'run',
+          stdout: outcome.stdout,
+          stderr: outcome.stderr,
+          exitCode: outcome.exitCode,
+          durationMs: outcome.durationMs,
+          timedOut: outcome.timedOut,
+          running: false,
+          statusText: '',
+        });
+      } catch (error) {
+        if (runTokenRef.current !== token) return;
+        setResult({
+          ok: false,
+          phase: 'run',
+          stdout: '',
+          stderr:
+            error?.name === 'AbortError'
+              ? '已停止执行\n'
+              : `云端执行失败：${error?.message || '未知错误'}\n`,
+          exitCode: null,
+          durationMs: 0,
+        });
+      } finally {
+        if (runTokenRef.current === token) {
+          judge0AbortRef.current = null;
+          setRunning(false);
+        }
+      }
+      return;
+    }
+
     const token = ++runTokenRef.current;
 
     setRunning(true);
@@ -429,7 +482,7 @@ export default function App() {
     });
 
     try {
-      const startRes = await fetch(apiPath('/api/sessions'), {
+      const startRes = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -443,7 +496,7 @@ export default function App() {
       if (!startRes.ok) throw new Error(started.error || '执行请求失败');
 
       sessionRef.current = started.id;
-      const streamRes = await fetch(apiPath(`/api/sessions/${started.id}/events`));
+      const streamRes = await fetch(`/api/sessions/${started.id}/events`);
       if (!streamRes.ok || !streamRes.body) throw new Error('无法建立输出流');
 
       const reader = streamRes.body.getReader();
@@ -491,7 +544,7 @@ export default function App() {
         stdout: '',
         stderr:
           error?.message === 'Failed to fetch'
-            ? '无法连接到执行服务，请检查网络或稍后重试。'
+            ? '无法连接到执行服务，请确认后端已启动（npm run dev）。'
             : `执行失败：${error?.message || '未知错误'}`,
         exitCode: null,
         durationMs: 0,
@@ -502,7 +555,19 @@ export default function App() {
         setRunning(false);
       }
     }
-  }, [activeId, activeIsPreview, applyEvent, entryPath, hasContent, project, running, stdin]);
+  }, [
+    activeCode,
+    activeId,
+    activeIsPreview,
+    applyEvent,
+    engine,
+    entryPath,
+    hasContent,
+    project,
+    running,
+    showToast,
+    stdin,
+  ]);
 
   const sendLine = useCallback(async () => {
     const id = sessionRef.current;
@@ -510,7 +575,7 @@ export default function App() {
     const text = lineInput;
     setLineInput('');
     try {
-      const res = await fetch(apiPath(`/api/sessions/${id}/input`), {
+      const res = await fetch(`/api/sessions/${id}/input`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ data: `${text}\n` }),
@@ -525,10 +590,11 @@ export default function App() {
   }, [lineInput, showToast]);
 
   const stopRun = useCallback(async () => {
+    judge0AbortRef.current?.abort();
     const id = sessionRef.current;
     if (!id) return;
     try {
-      await fetch(apiPath(`/api/sessions/${id}/stop`), { method: 'POST' });
+      await fetch(`/api/sessions/${id}/stop`, { method: 'POST' });
     } catch {
       /* ignore */
     }
@@ -536,10 +602,11 @@ export default function App() {
 
   // 切换语言时中断上一次运行，避免旧程序的输出串到新语言
   const cancelRun = useCallback(() => {
-    if (!sessionRef.current) return;
+    if (!sessionRef.current && !judge0AbortRef.current) return;
     runTokenRef.current += 1;
     stopRun();
     sessionRef.current = null;
+    judge0AbortRef.current = null;
     setRunning(false);
     setResult(null);
   }, [stopRun]);
@@ -606,7 +673,7 @@ export default function App() {
     if (sharing) return;
     setSharing(true);
     try {
-      const res = await fetch(apiPath('/api/shares'), {
+      const res = await fetch('/api/shares', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -619,7 +686,7 @@ export default function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '生成分享链接失败');
 
-      const link = `${API_BASE || window.location.origin}${data.path}`;
+      const link = `${window.location.origin}${data.path}`;
       setShareLink(link);
       setShareOpen(true);
       try {
@@ -650,7 +717,7 @@ export default function App() {
     if (!match) return undefined;
 
     let cancelled = false;
-    fetch(apiPath(`/api/shares/${match[1]}`))
+    fetch(`/api/shares/${match[1]}`)
       .then((res) => {
         if (!res.ok) throw new Error('分享链接不存在或已失效');
         return res.json();
@@ -766,8 +833,8 @@ export default function App() {
             <span className={`status-pill ${status}`}>
               <span className="dot" />
               {status === 'loading'
-                ? '正在连接云端执行服务…'
-                : `${availableCount} / ${catalog.length} 种语言可执行`}
+                ? '正在连接执行服务…'
+                : `${availableCount} / ${catalog.length} 个运行时就绪`}
             </span>
           )}
         </div>
@@ -846,14 +913,14 @@ export default function App() {
                           title={
                             lang.available
                               ? `${lang.name} ${lang.version || ''}`
-                              : lang.reason || '暂不支持云端执行'
+                              : lang.reason || '本机未安装该运行时'
                           }
                         >
                           <span className="monogram">{lang.monogram}</span>
                           <span className="rail-meta">
                             <span className="rail-name">{lang.name}</span>
                             <span className="rail-version">
-                              {lang.available ? lang.version || '可用' : '不可用'}
+                              {lang.available ? lang.version || '已安装' : '未安装'}
                             </span>
                           </span>
                           <span className={`avail-dot${lang.available ? ' on' : ''}`} />
@@ -863,7 +930,7 @@ export default function App() {
               </div>
               <div className="rail-foot">
                 <span className="ping" />
-                代码在云端服务器执行
+                {engine === 'judge0' ? '浏览器直连云端执行' : '代码在云端服务器执行'}
               </div>
             </>
           ) : (
@@ -956,8 +1023,7 @@ export default function App() {
               type="button"
               className="ghost-btn"
               onClick={handleShare}
-              disabled={sharing || !hasContent || STATIC_HOST}
-              title={STATIC_HOST ? '静态部署未连接执行服务，暂不支持分享' : undefined}
+              disabled={sharing || !hasContent}
             >
               {sharing ? '生成中…' : '分享'}
             </button>
@@ -1090,8 +1156,8 @@ export default function App() {
                   <p>{activeIsPreview ? '点击「运行代码」预览页面' : '点击「运行代码」查看结果'}</p>
                   <span>
                     {availableCount > 0
-                      ? `${availableCount} 种语言可云端执行 · 支持 ${SNIPPET_COUNT} 种语言`
-                      : '正在连接云端执行服务'}
+                      ? `${availableCount} 个运行时可用 · 支持 ${SNIPPET_COUNT} 种语言`
+                      : '正在检测本机可用的语言运行时'}
                   </span>
                 </div>
               )}
