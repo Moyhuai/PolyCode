@@ -11,6 +11,24 @@ import { rust } from '@codemirror/lang-rust';
 import { go } from '@codemirror/lang-go';
 import { php } from '@codemirror/lang-php';
 import { ruby } from '@codemirror/legacy-modes/mode/ruby';
+import { lua } from '@codemirror/legacy-modes/mode/lua';
+import { perl } from '@codemirror/legacy-modes/mode/perl';
+import { shell } from '@codemirror/legacy-modes/mode/shell';
+import { pascal } from '@codemirror/legacy-modes/mode/pascal';
+import { erlang } from '@codemirror/legacy-modes/mode/erlang';
+import { d } from '@codemirror/legacy-modes/mode/d';
+import { octave } from '@codemirror/legacy-modes/mode/octave';
+import { groovy } from '@codemirror/legacy-modes/mode/groovy';
+import { haskell } from '@codemirror/legacy-modes/mode/haskell';
+import { fSharp, oCaml } from '@codemirror/legacy-modes/mode/mllike';
+import { commonLisp } from '@codemirror/legacy-modes/mode/commonlisp';
+import { clojure } from '@codemirror/legacy-modes/mode/clojure';
+import { fortran } from '@codemirror/legacy-modes/mode/fortran';
+import { sqlite } from '@codemirror/legacy-modes/mode/sql';
+import { swift } from '@codemirror/legacy-modes/mode/swift';
+import { csharp, dart, kotlin, scala } from '@codemirror/legacy-modes/mode/clike';
+
+const legacy = (mode) => StreamLanguage.define(mode);
 
 export function languageExtension(id) {
   switch (id) {
@@ -35,8 +53,48 @@ export function languageExtension(id) {
       return go();
     case 'php':
       return php();
+    case 'csharp':
+      return legacy(csharp);
+    case 'kotlin':
+      return legacy(kotlin);
+    case 'scala':
+      return legacy(scala);
+    case 'dart':
+      return legacy(dart);
+    case 'swift':
+      return legacy(swift);
     case 'ruby':
-      return StreamLanguage.define(ruby);
+      return legacy(ruby);
+    case 'lua':
+      return legacy(lua);
+    case 'perl':
+      return legacy(perl);
+    case 'bash':
+      return legacy(shell);
+    case 'pascal':
+      return legacy(pascal);
+    case 'erlang':
+      return legacy(erlang);
+    case 'd':
+      return legacy(d);
+    case 'octave':
+      return legacy(octave);
+    case 'groovy':
+      return legacy(groovy);
+    case 'haskell':
+      return legacy(haskell);
+    case 'fsharp':
+      return legacy(fSharp);
+    case 'ocaml':
+      return legacy(oCaml);
+    case 'lisp':
+      return legacy(commonLisp);
+    case 'clojure':
+      return legacy(clojure);
+    case 'fortran':
+      return legacy(fortran);
+    case 'sql':
+      return legacy(sqlite);
     default:
       return [];
   }
@@ -128,17 +186,6 @@ export const polyTheme = EditorView.theme(
     '.cm-completionIcon': {
       paddingRight: '5px',
       opacity: '0.85',
-    },
-    '.cm-completionInfo': {
-      padding: '8px 10px',
-      maxWidth: '320px',
-      border: '1px solid rgba(132, 158, 255, 0.2)',
-      borderRadius: '10px',
-      background: 'rgba(12, 18, 33, 0.98)',
-      color: '#a9b6d6',
-      fontFamily: '"Inter", "PingFang SC", "Microsoft YaHei", sans-serif',
-      fontSize: '11.5px',
-      lineHeight: '1.6',
     },
   },
   { dark: true }

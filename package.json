@@ -1,15 +1,13 @@
 {
   "name": "polycode",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
-  "description": "多语言在线编写与运行平台",
+  "description": "多语言在线运行平台（纯静态，GitHub Pages 部署）",
   "scripts": {
-    "dev": "concurrently -k -n server,web -c cyan,magenta \"npm:dev:server\" \"npm:dev:web\"",
-    "dev:web": "vite",
-    "dev:server": "node server/index.mjs",
+    "dev": "vite",
     "build": "vite build",
-    "start": "node server/index.mjs"
+    "preview": "vite preview"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",
@@ -28,14 +26,11 @@
     "@codemirror/state": "^6.5.0",
     "@codemirror/view": "^6.36.1",
     "@lezer/highlight": "^1.2.1",
-    "cors": "^2.8.5",
-    "express": "^4.21.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
-    "concurrently": "^9.1.2",
     "vite": "^5.4.11"
   }
 }
