@@ -10,6 +10,7 @@ COPY src ./src
 RUN npm run build
 
 # ---------- 运行镜像 ----------
+# 同时支持 x86_64 与 ARM64（Oracle 永久免费实例为 ARM A1）
 FROM node:24-slim
 WORKDIR /app
 
@@ -38,10 +39,12 @@ RUN npm ci --omit=dev
 COPY server ./server
 COPY --from=build /app/dist ./dist
 
-RUN mkdir -p /app/.data && chown -R node:node /app
+# 分享数据目录，容器内属于 node 用户；预置 .keep 让命名卷首次挂载时继承属主
+RUN mkdir -p /app/.data \
+  && touch /app/.data/.keep \
+  && chown -R node:node /app
 USER node
 
 EXPOSE 8787
 
-# Render 会用自身的 PORT 环境变量覆盖上面的默认值
 CMD ["node", "server/index.mjs"]
