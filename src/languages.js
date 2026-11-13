@@ -248,3 +248,18 @@ puts "平均长度：#{words.sum(&:length).to_f / words.size}"
 
 export const DEFAULT_CODE =
   '# 在此输入程序的标准输入（可选）\n# 例如：输入多行数据后，程序可通过 stdin 读取\n';
+
+// 纯静态托管（如 GitHub Pages）没有执行服务时使用的内置语言目录
+export const LANGUAGE_CATALOG = [
+  { id: 'html', name: 'HTML', monogram: 'HTML', color: '#e34f26', fileName: 'index.html', preview: true, available: true, version: '浏览器预览', reason: null },
+  { id: 'javascript', name: 'JavaScript', monogram: 'JS', color: '#f7df1e', fileName: 'main.js', preview: false, available: false, version: null, reason: '静态部署未连接执行服务' },
+  { id: 'typescript', name: 'TypeScript', monogram: 'TS', color: '#3178c6', fileName: 'main.ts', preview: false, available: false, version: null, reason: '静态部署未连接执行服务' },
+  { id: 'python', name: 'Python', monogram: 'PY', color: '#3776ab', fileName: 'main.py', preview: false, available: false, version: null, reason: '静态部署未连接执行服务' },
+  { id: 'c', name: 'C', monogram: 'C', color: '#5c6bc0', fileName: 'main.c', preview: false, available: false, version: null, reason: '静态部署未连接执行服务' },
+  { id: 'cpp', name: 'C++', monogram: 'C++', color: '#00599c', fileName: 'main.cpp', preview: false, available: false, version: null, reason: '静态部署未连接执行服务' },
+  { id: 'rust', name: 'Rust', monogram: 'RS', color: '#dea584', fileName: 'main.rs', preview: false, available: false, version: null, reason: '静态部署未连接执行服务' },
+  { id: 'java', name: 'Java', monogram: 'JV', color: '#e76f00', fileName: 'Main.java', preview: false, available: false, version: null, reason: '静态部署未连接执行服务' },
+  { id: 'go', name: 'Go', monogram: 'GO', color: '#00add8', fileName: 'main.go', preview: false, available: false, version: null, reason: '静态部署未连接执行服务' },
+  { id: 'php', name: 'PHP', monogram: 'PHP', color: '#777bb4', fileName: 'main.php', preview: false, available: false, version: null, reason: '静态部署未连接执行服务' },
+  { id: 'ruby', name: 'Ruby', monogram: 'RB', color: '#cc342d', fileName: 'main.rb', preview: false, available: false, version: null, reason: '静态部署未连接执行服务' },
+];

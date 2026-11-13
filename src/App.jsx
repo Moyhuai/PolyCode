@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import CodeEditor from './components/CodeEditor';
 import PromptLibrary from './components/PromptLibrary';
-import { SNIPPETS } from './languages';
+import { LANGUAGE_CATALOG, SNIPPETS } from './languages';
 import {
   buildPreviewHtml,
   buildTree,
@@ -19,6 +19,12 @@ import {
 } from './projectStore';
 
 const SNIPPET_COUNT = Object.keys(SNIPPETS).length;
+
+// 构建时可通过 VITE_API_BASE 指向独立部署的执行服务；
+// VITE_STATIC_HOST 表示纯静态托管（如 GitHub Pages），此时不请求 /api，直接进入离线模式
+const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '');
+const STATIC_HOST = !API_BASE && import.meta.env.VITE_STATIC_HOST === 'true';
+const apiPath = (path) => `${API_BASE}${path}`;
 
 function formatDuration(ms) {
   if (typeof ms !== 'number' || Number.isNaN(ms)) return '—';
@@ -204,12 +210,20 @@ export default function App() {
     [project]
   );
   const canRun =
-    status === 'ready' && Boolean(activeMeta?.available) && !running && hasContent;
+    (status === 'ready' || activeIsPreview) &&
+    Boolean(activeMeta?.available) &&
+    !running &&
+    hasContent;
 
   useEffect(() => {
     let cancelled = false;
+    if (STATIC_HOST) {
+      setCatalog(LANGUAGE_CATALOG);
+      setStatus('offline');
+      return undefined;
+    }
     setStatus('loading');
-    fetch('/api/languages')
+    fetch(apiPath('/api/languages'))
       .then((res) => {
         if (!res.ok) throw new Error('bad response');
         return res.json();
@@ -220,7 +234,9 @@ export default function App() {
         setStatus('ready');
       })
       .catch(() => {
-        if (!cancelled) setStatus('offline');
+        if (cancelled) return;
+        setCatalog(LANGUAGE_CATALOG);
+        setStatus('offline');
       });
     return () => {
       cancelled = true;
@@ -413,7 +429,7 @@ export default function App() {
     });
 
     try {
-      const startRes = await fetch('/api/sessions', {
+      const startRes = await fetch(apiPath('/api/sessions'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -427,7 +443,7 @@ export default function App() {
       if (!startRes.ok) throw new Error(started.error || '执行请求失败');
 
       sessionRef.current = started.id;
-      const streamRes = await fetch(`/api/sessions/${started.id}/events`);
+      const streamRes = await fetch(apiPath(`/api/sessions/${started.id}/events`));
       if (!streamRes.ok || !streamRes.body) throw new Error('无法建立输出流');
 
       const reader = streamRes.body.getReader();
@@ -494,7 +510,7 @@ export default function App() {
     const text = lineInput;
     setLineInput('');
     try {
-      const res = await fetch(`/api/sessions/${id}/input`, {
+      const res = await fetch(apiPath(`/api/sessions/${id}/input`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ data: `${text}\n` }),
@@ -512,7 +528,7 @@ export default function App() {
     const id = sessionRef.current;
     if (!id) return;
     try {
-      await fetch(`/api/sessions/${id}/stop`, { method: 'POST' });
+      await fetch(apiPath(`/api/sessions/${id}/stop`), { method: 'POST' });
     } catch {
       /* ignore */
     }
@@ -590,7 +606,7 @@ export default function App() {
     if (sharing) return;
     setSharing(true);
     try {
-      const res = await fetch('/api/shares', {
+      const res = await fetch(apiPath('/api/shares'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -603,7 +619,7 @@ export default function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '生成分享链接失败');
 
-      const link = `${window.location.origin}${data.path}`;
+      const link = `${API_BASE || window.location.origin}${data.path}`;
       setShareLink(link);
       setShareOpen(true);
       try {
@@ -634,7 +650,7 @@ export default function App() {
     if (!match) return undefined;
 
     let cancelled = false;
-    fetch(`/api/shares/${match[1]}`)
+    fetch(apiPath(`/api/shares/${match[1]}`))
       .then((res) => {
         if (!res.ok) throw new Error('分享链接不存在或已失效');
         return res.json();
@@ -940,7 +956,8 @@ export default function App() {
               type="button"
               className="ghost-btn"
               onClick={handleShare}
-              disabled={sharing || !hasContent}
+              disabled={sharing || !hasContent || STATIC_HOST}
+              title={STATIC_HOST ? '静态部署未连接执行服务，暂不支持分享' : undefined}
             >
               {sharing ? '生成中…' : '分享'}
             </button>
