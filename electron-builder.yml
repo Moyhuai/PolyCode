@@ -1,0 +1,29 @@
+appId: com.moyhuai.polycode
+productName: PolyCode
+copyright: Copyright © 2026 Moyhuai
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - electron/**/*
+  - package.json
+  - '!node_modules/**/*'
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.png
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: PolyCode
+  artifactName: PolyCode-Setup-${version}.${ext}
