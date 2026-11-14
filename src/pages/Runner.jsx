@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import CodeEditor from '../components/CodeEditor';
+import JoinRoomDialog from '../components/JoinRoomDialog';
 import LiveShare from '../components/LiveShare';
 import SiteHeader from '../components/SiteHeader';
 import { ExternalIcon, PlayIcon, ShareIcon, StopIcon, TerminalIcon } from '../components/icons';
@@ -7,7 +8,7 @@ import { COMPILER_LANGUAGES, FRONTEND_LANGUAGES } from '../data/languages';
 import { fakeDecrypt, fakeEncrypt } from '../lib/armor';
 import { runOnJudge0 } from '../lib/judge0';
 import { toolHref } from '../lib/router';
-import { createRoomId, readRoomFromUrl, removeRoomFromUrl } from '../lib/share';
+import { createRoomId, readRoomFromUrl, removeRoomFromUrl, setRoomInUrl } from '../lib/share';
 
 function formatTime(value) {
   if (value === null || value === undefined) return '—';
@@ -40,6 +41,7 @@ export default function Runner({ language }) {
     return roomId ? { role: 'guest', roomId } : null;
   });
   const [shareOpen, setShareOpen] = useState(() => Boolean(readRoomFromUrl()));
+  const [joinOpen, setJoinOpen] = useState(false);
   const abortRef = useRef(null);
 
   useEffect(() => {
@@ -165,6 +167,13 @@ export default function Runner({ language }) {
     setShareOpen(false);
   };
 
+  const joinRoom = (roomId) => {
+    setJoinOpen(false);
+    setRoomInUrl(roomId);
+    setShareSession({ role: 'guest', roomId });
+    setShareOpen(true);
+  };
+
   const ok = Boolean(
     result &&
       !result.preview &&
@@ -204,6 +213,10 @@ export default function Runner({ language }) {
                   ? '共享中'
                   : '查看共享代码'
                 : '共享代码'}
+            </button>
+
+            <button type="button" className="ghost-btn share-trigger" onClick={() => setJoinOpen(true)}>
+              加入房间
             </button>
 
             <label className="lang-select">
@@ -401,6 +414,10 @@ export default function Runner({ language }) {
         </p>
       </main>
 
+      {joinOpen && (
+        <JoinRoomDialog open={joinOpen} onClose={() => setJoinOpen(false)} onJoin={joinRoom} />
+      )}
+
       {shareSession && (
         <LiveShare
           open={shareOpen}
@@ -411,6 +428,7 @@ export default function Runner({ language }) {
           onClose={closeShare}
           onStop={stopShare}
           onExit={exitShare}
+          onChangeRoom={(roomId) => setShareSession({ role: 'host', roomId })}
         />
       )}
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Peer } from 'peerjs';
-import { buildShareLink, copyText, describeShareError } from '../lib/share';
+import { buildShareLink, copyText, describeShareError, isRoomId } from '../lib/share';
 import { CloseIcon, ShareIcon } from './icons';
 
 export default function LiveShare({
@@ -12,6 +12,7 @@ export default function LiveShare({
   onClose,
   onStop,
   onExit,
+  onChangeRoom,
 }) {
   const isHost = role === 'host';
   const [status, setStatus] = useState('connecting');
@@ -21,11 +22,18 @@ export default function LiveShare({
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
   const [copyState, setCopyState] = useState('');
+  const [roomDraft, setRoomDraft] = useState(roomId);
   const peerRef = useRef(null);
   const connsRef = useRef([]);
   const codeRef = useRef(code);
 
   codeRef.current = code;
+
+  useEffect(() => {
+    setRemoteCode('');
+    setRemoteLanguage('');
+    setRoomDraft(roomId);
+  }, [role, roomId]);
 
   // 建立连接：房主创建房间，访客加入房间
   useEffect(() => {
@@ -129,6 +137,12 @@ export default function LiveShare({
     window.setTimeout(() => setCopyState(''), 1800);
   }, []);
 
+  const applyRoom = (event) => {
+    event.preventDefault();
+    if (!isRoomId(roomDraft) || roomDraft === roomId) return;
+    onChangeRoom(roomDraft);
+  };
+
   if (!open) return null;
 
   const link = buildShareLink(roomId, language.id);
@@ -192,8 +206,28 @@ export default function LiveShare({
         {isHost ? (
           <>
             <div className="share-field">
-              <span className="share-label">房间号</span>
-              <code className="share-room">{roomId}</code>
+              <span className="share-label">房间号（可自定义 5 位字母或数字）</span>
+              <form className="share-room-row" onSubmit={applyRoom}>
+                <input
+                  className="share-room-input"
+                  value={roomDraft}
+                  onChange={(event) => {
+                    const next = event.target.value.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5);
+                    setRoomDraft(next);
+                  }}
+                  placeholder="例如 abc12"
+                  spellCheck={false}
+                  aria-label="房间号"
+                />
+                <button
+                  type="submit"
+                  className="ghost-btn share-room-apply"
+                  disabled={!isRoomId(roomDraft) || roomDraft === roomId}
+                >
+                  应用
+                </button>
+              </form>
+              <p className="share-room-tip">修改后会用新房间号重新创建房间，对方需要重新加入。</p>
             </div>
 
             <div className="share-field">

@@ -1,17 +1,23 @@
 import { toolHref } from './router';
 
-const ROOM_PATTERN = /^[a-zA-Z0-9_-]{6,40}$/;
-const ROOM_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
+const ROOM_PATTERN = /^[a-z0-9]{5}$/;
+const ROOM_LETTERS = 'abcdefghjkmnpqrstuvwxyz';
+const ROOM_DIGITS = '23456789';
+const ROOM_ALPHABET = ROOM_LETTERS + ROOM_DIGITS;
 
-// 生成带前缀的随机房间号，避免与 PeerJS 上其他用户冲突
+// 生成 5 位字母数字房间号，避免易混淆字符
 export function createRoomId() {
-  const bytes = new Uint8Array(10);
+  const bytes = new Uint8Array(5);
   crypto.getRandomValues(bytes);
-  let id = '';
-  bytes.forEach((byte) => {
-    id += ROOM_ALPHABET[byte % ROOM_ALPHABET.length];
-  });
-  return `pc-${id}`;
+  const chars = Array.from(bytes, (byte) => ROOM_ALPHABET[byte % ROOM_ALPHABET.length]);
+  // 保证房间号同时包含字母和数字
+  if (!chars.some((char) => ROOM_LETTERS.includes(char))) {
+    chars[0] = ROOM_LETTERS[bytes[0] % ROOM_LETTERS.length];
+  }
+  if (!chars.some((char) => ROOM_DIGITS.includes(char))) {
+    chars[1] = ROOM_DIGITS[bytes[1] % ROOM_DIGITS.length];
+  }
+  return chars.join('');
 }
 
 export function isRoomId(value) {
@@ -20,11 +26,31 @@ export function isRoomId(value) {
 
 export function readRoomFromUrl() {
   try {
-    const room = new URLSearchParams(window.location.search).get('room');
+    const room = new URLSearchParams(window.location.search).get('room')?.trim().toLowerCase();
     return isRoomId(room) ? room : null;
   } catch {
     return null;
   }
+}
+
+// 支持直接输入房间号，或粘贴完整的共享链接
+export function parseRoomInput(value) {
+  const text = String(value ?? '').trim().toLowerCase();
+  if (!text) return null;
+  if (isRoomId(text)) return text;
+  try {
+    const url = new URL(text, window.location.origin);
+    const room = url.searchParams.get('room')?.trim().toLowerCase();
+    return isRoomId(room) ? room : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setRoomInUrl(roomId) {
+  const url = new URL(window.location.href);
+  url.searchParams.set('room', roomId);
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
 }
 
 export function removeRoomFromUrl() {
