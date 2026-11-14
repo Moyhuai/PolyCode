@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Peer } from 'peerjs';
-import { buildShareLink, copyText, describeShareError, isRoomId } from '../lib/share';
+import { buildShareLink, copyText, describeShareError, isRoomId, PEER_OPTIONS } from '../lib/share';
 import { CloseIcon, ShareIcon } from './icons';
 
 export default function LiveShare({
@@ -46,12 +46,13 @@ export default function LiveShare({
 
     let disposed = false;
     let peer = null;
+    let connectTimer = null;
 
     // 延迟创建，避开 StrictMode 下开发环境的重复挂载
     const timer = window.setTimeout(() => {
       if (disposed) return;
 
-      peer = isHost ? new Peer(roomId) : new Peer();
+      peer = isHost ? new Peer(roomId, PEER_OPTIONS) : new Peer(PEER_OPTIONS);
       peerRef.current = peer;
 
       if (isHost) {
@@ -76,17 +77,36 @@ export default function LiveShare({
           conn.on('error', drop);
         });
       } else {
+        let settled = false;
+        connectTimer = window.setTimeout(() => {
+          if (disposed || settled) return;
+          setStatus('error');
+          setError('连接超时：双方网络可能无法直接互通，请尝试连接同一网络或更换网络后重试');
+        }, 15000);
+
+        const finish = () => {
+          settled = true;
+          window.clearTimeout(connectTimer);
+        };
+
         peer.on('open', () => {
           if (disposed) return;
           const conn = peer.connect(roomId, { reliable: true });
-          conn.on('open', () => setStatus('connected'));
+          conn.on('open', () => {
+            finish();
+            setStatus('connected');
+          });
           conn.on('data', (data) => {
             if (!data || data.type !== 'code') return;
             if (typeof data.code === 'string') setRemoteCode(data.code);
             if (typeof data.language === 'string') setRemoteLanguage(data.language);
           });
-          conn.on('close', () => setStatus('closed'));
+          conn.on('close', () => {
+            finish();
+            setStatus('closed');
+          });
           conn.on('error', (err) => {
+            finish();
             setStatus('error');
             setError(describeShareError(err));
           });
@@ -97,6 +117,7 @@ export default function LiveShare({
         if (!peer.destroyed) peer.reconnect();
       });
       peer.on('error', (err) => {
+        window.clearTimeout(connectTimer);
         setStatus('error');
         setError(describeShareError(err));
       });
@@ -105,6 +126,7 @@ export default function LiveShare({
     return () => {
       disposed = true;
       window.clearTimeout(timer);
+      window.clearTimeout(connectTimer);
       if (peer) peer.destroy();
       peerRef.current = null;
       connsRef.current = [];

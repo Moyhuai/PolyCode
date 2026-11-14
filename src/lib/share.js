@@ -59,6 +59,25 @@ export function removeRoomFromUrl() {
   window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
 }
 
+// ICE 服务器：STUN 用于发现公网地址，TURN 在双方无法直连时中继
+export const PEER_OPTIONS = {
+  config: {
+    iceServers: [
+      { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+      { urls: 'stun:stun.qq.com:3478' },
+      {
+        urls: [
+          'turn:openrelay.metered.ca:80',
+          'turn:openrelay.metered.ca:443',
+          'turn:openrelay.metered.ca:443?transport=tcp',
+        ],
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+    ],
+  },
+};
+
 export function buildShareLink(roomId, languageId) {
   const url = new URL(toolHref(languageId), window.location.origin);
   url.searchParams.set('room', roomId);
