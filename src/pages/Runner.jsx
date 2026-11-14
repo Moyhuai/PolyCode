@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import CodeEditor from '../components/CodeEditor';
-import JoinRoomDialog from '../components/JoinRoomDialog';
-import LiveShare from '../components/LiveShare';
 import SiteHeader from '../components/SiteHeader';
-import { ExternalIcon, PlayIcon, ShareIcon, StopIcon, TerminalIcon } from '../components/icons';
+import { ExternalIcon, PlayIcon, StopIcon, TerminalIcon } from '../components/icons';
 import { COMPILER_LANGUAGES, FRONTEND_LANGUAGES } from '../data/languages';
 import { fakeDecrypt, fakeEncrypt } from '../lib/armor';
 import { runOnJudge0 } from '../lib/judge0';
 import { toolHref } from '../lib/router';
-import { createRoomId, readRoomFromUrl, removeRoomFromUrl, setRoomInUrl } from '../lib/share';
 
 function formatTime(value) {
   if (value === null || value === undefined) return '—';
@@ -36,12 +33,6 @@ export default function Runner({ language }) {
   const [running, setRunning] = useState(false);
   const [resetKey, setResetKey] = useState(0);
   const [toast, setToast] = useState('');
-  const [shareSession, setShareSession] = useState(() => {
-    const roomId = readRoomFromUrl();
-    return roomId ? { role: 'guest', roomId } : null;
-  });
-  const [shareOpen, setShareOpen] = useState(() => Boolean(readRoomFromUrl()));
-  const [joinOpen, setJoinOpen] = useState(false);
   const abortRef = useRef(null);
 
   useEffect(() => {
@@ -149,31 +140,6 @@ export default function Runner({ language }) {
     window.location.href = toolHref(event.target.value);
   };
 
-  const openShare = () => {
-    setShareSession((current) => current || { role: 'host', roomId: createRoomId() });
-    setShareOpen(true);
-  };
-
-  const closeShare = () => setShareOpen(false);
-
-  const stopShare = () => {
-    setShareSession(null);
-    setShareOpen(false);
-  };
-
-  const exitShare = () => {
-    removeRoomFromUrl();
-    setShareSession(null);
-    setShareOpen(false);
-  };
-
-  const joinRoom = (roomId) => {
-    setJoinOpen(false);
-    setRoomInUrl(roomId);
-    setShareSession({ role: 'guest', roomId });
-    setShareOpen(true);
-  };
-
   const ok = Boolean(
     result &&
       !result.preview &&
@@ -201,44 +167,25 @@ export default function Runner({ language }) {
             </div>
           </div>
 
-          <div className="runner-actions">
-            <button
-              type="button"
-              className={`ghost-btn share-trigger${shareSession ? ' active' : ''}`}
-              onClick={openShare}
-            >
-              <ShareIcon />
-              {shareSession
-                ? shareSession.role === 'host'
-                  ? '共享中'
-                  : '查看共享代码'
-                : '共享代码'}
-            </button>
-
-            <button type="button" className="ghost-btn share-trigger" onClick={() => setJoinOpen(true)}>
-              加入房间
-            </button>
-
-            <label className="lang-select">
-              <span>切换语言</span>
-              <select value={language.id} onChange={switchLanguage} aria-label="切换语言">
-                <optgroup label="编译工具">
-                  {COMPILER_LANGUAGES.map((item) => (
-                    <option value={item.id} key={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label="前端编辑器">
-                  {FRONTEND_LANGUAGES.map((item) => (
-                    <option value={item.id} key={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-                </optgroup>
-              </select>
-            </label>
-          </div>
+          <label className="lang-select">
+            <span>切换语言</span>
+            <select value={language.id} onChange={switchLanguage} aria-label="切换语言">
+              <optgroup label="编译工具">
+                {COMPILER_LANGUAGES.map((item) => (
+                  <option value={item.id} key={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="前端编辑器">
+                {FRONTEND_LANGUAGES.map((item) => (
+                  <option value={item.id} key={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </label>
         </div>
 
         <div className="runner-grid">
@@ -413,24 +360,6 @@ export default function Runner({ language }) {
           代码在 Judge0 CE 公共沙箱中执行，公共接口有频率限制；请勿在代码或输入中填写密码、密钥等敏感信息。
         </p>
       </main>
-
-      {joinOpen && (
-        <JoinRoomDialog open={joinOpen} onClose={() => setJoinOpen(false)} onJoin={joinRoom} />
-      )}
-
-      {shareSession && (
-        <LiveShare
-          open={shareOpen}
-          role={shareSession.role}
-          roomId={shareSession.roomId}
-          code={code}
-          language={language}
-          onClose={closeShare}
-          onStop={stopShare}
-          onExit={exitShare}
-          onChangeRoom={(roomId) => setShareSession({ role: 'host', roomId })}
-        />
-      )}
 
       {toast && <div className="toast">{toast}</div>}
     </>
